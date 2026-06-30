@@ -1,0 +1,13 @@
+# Core service
+fastapi
+uvicorn
+pydantic>=2
+python-dotenv
+pyyaml
+httpx
+
+# Models
+torch
+transformers>=4.44
+einops          # required by jina-reranker-v3 remote code
+FlagEmbedding   # BGE-M3 embedder (default) + bge-reranker-v2-m3 (RERANKER=bge)
