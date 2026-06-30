@@ -82,3 +82,6 @@ Point each client's `RAGINFER_URL` at `http://<host>:8799`. ARag ships
 (`ARag/src/embeddings/remote_embedder.py`); the XBRL narrative retriever uses
 both automatically when `RAGINFER_URL` is set, falling back to local models only
 when it is not. MacroRAG needs equivalent shims.
+
+See [`docs/user-guide.md`](docs/user-guide.md) for a client-facing guide:
+connecting via `RAGINFER_URL`, the full API reference, and common troubleshooting.
