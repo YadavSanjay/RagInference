@@ -1,0 +1,5 @@
+# Keep container scripts LF regardless of core.autocrlf — a CRLF entrypoint.sh
+# fails inside the Linux image (`\r` in the shebang / interpreter path).
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf

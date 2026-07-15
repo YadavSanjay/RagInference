@@ -1,0 +1,28 @@
+# Build-context ignore for infra/Dockerfile (BuildKit reads <dockerfile>.dockerignore).
+# Keep the context tiny: source + requirements + infra scripts only.
+
+.git
+.gitignore
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Never ship local model caches / env secrets into the build context.
+.cache/
+**/.cache/huggingface/
+models/
+*.env
+.env
+!infra/.env.example
+
+# Docs / tests are not needed to build the runtime image.
+docs/
+test/
+*.md
+!README.md

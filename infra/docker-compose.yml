@@ -1,0 +1,117 @@
+# RagInference — Docker Compose for both weight-delivery strategies.
+#
+# Select one with a profile:
+#
+#   Case A (fat / weights baked in):
+#       docker compose -f infra/docker-compose.yml --profile fat up --build
+#
+#   Case B (slim / weights referenced from S3, demoed here with MinIO):
+#       docker compose -f infra/docker-compose.yml --profile slim up --build
+#
+# The two share nothing at runtime; profiles keep them independent.
+
+name: raginfer
+
+services:
+  # ---------------------------------------------------------------------------
+  # Case A — self-contained image. Weights baked at build via BAKE_MODELS.
+  # No network needed at runtime. Bigger image, fastest cold start.
+  # ---------------------------------------------------------------------------
+  raginfer-fat:
+    profiles: ["fat"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      args:
+        BAKE_MODELS: "bge jina"
+    image: raginfer:fat
+    environment:
+      MODEL_SOURCE: baked
+      RERANKER: jina
+      EMBEDDER: bge
+    ports:
+      - "8799:8799"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Case B — slim image + weights synced from S3 into a shared volume.
+  #
+  # `model-init` runs once, pulls the weights into the `models` volume, exits.
+  # `raginfer-slim` waits for it, then mounts the volume read-only and runs
+  # OFFLINE. Swap the MinIO endpoint/URI for real S3 in production and drop
+  # the `minio` service + AWS_ENDPOINT_URL.
+  # ---------------------------------------------------------------------------
+  raginfer-slim:
+    profiles: ["slim"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      # BAKE_MODELS omitted -> no weights in image.
+    image: raginfer:slim
+    environment:
+      MODEL_SOURCE: baked   # weights arrive via the pre-populated volume; run offline
+      HF_HOME: /models
+      RERANKER: jina
+      EMBEDDER: bge
+    volumes:
+      - models:/models:ro
+    ports:
+      - "8799:8799"
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  model-init:
+    profiles: ["slim"]
+    image: amazon/aws-cli:latest
+    environment:
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-minioadmin}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-minioadmin}"
+      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        aws --endpoint-url "${AWS_ENDPOINT_URL:-http://minio:9000}"
+        s3 sync "${MODEL_S3_URI:-s3://raginfer-models}" /models
+    volumes:
+      - models:/models
+    depends_on:
+      minio-setup:
+        condition: service_completed_successfully
+
+  # --- Local S3 (MinIO) for demoing Case B without a real bucket. ------------
+  minio:
+    profiles: ["slim"]
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${AWS_ACCESS_KEY_ID:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${AWS_SECRET_ACCESS_KEY:-minioadmin}"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  # Creates the bucket and uploads local ./models weights into it (once).
+  # Populate ./models first:  HF_HOME=./models python infra/download_models.py
+  minio-setup:
+    profiles: ["slim"]
+    image: minio/mc:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        mc alias set local http://minio:9000
+        "${AWS_ACCESS_KEY_ID:-minioadmin}" "${AWS_SECRET_ACCESS_KEY:-minioadmin}" &&
+        mc mb --ignore-existing local/raginfer-models &&
+        mc mirror --overwrite /seed local/raginfer-models
+    volumes:
+      - ../models:/seed:ro
+    depends_on:
+      minio:
+        condition: service_started
+
+volumes:
+  models:
+  minio-data:
