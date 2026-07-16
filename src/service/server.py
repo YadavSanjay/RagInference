@@ -50,12 +50,16 @@ def _warmup() -> None:
 
 
 def main() -> None:
-    host = os.getenv("RAGINFER_HOST", "127.0.0.1")
-    port = int(os.getenv("RAGINFER_PORT", "8799"))
-    if os.getenv("RAGINFER_WARMUP", "1").strip().lower() not in ("0", "false", "no", "off"):
+    from src.config.settings import get_settings
+
+    settings = get_settings()
+    if settings.warmup:
         _warmup()
-    logger.info("starting RagInference service on %s:%d", host, port)
-    uvicorn.run(app, host=host, port=port, log_config=None)
+    logger.info(
+        "starting RagInference service on %s:%d (deploy_mode=%s, model_source=%s)",
+        settings.host, settings.port, settings.deploy_mode, settings.model_source,
+    )
+    uvicorn.run(app, host=settings.host, port=settings.port, log_config=None)
 
 
 if __name__ == "__main__":

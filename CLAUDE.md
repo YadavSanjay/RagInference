@@ -22,19 +22,25 @@ RAGINFER_HOST=0.0.0.0 RAGINFER_PORT=8799 RERANKER=jina EMBEDDER=bge \
     conda run -n py312 python -m src.service.server
 
 # Tests (fast — stub models injected, no weights loaded)
-conda run -n py312 python -m pytest test/test_service.py -q
+conda run -n py312 python -m pytest test/ -q                            # service + settings
 conda run -n py312 python -m pytest test/test_service.py -q -k rerank   # a single test
+conda run -n py312 python -m pytest test/test_settings.py -q            # DEPLOY_MODE / storage seam
 ```
 
-Env knobs: `RAGINFER_HOST` / `RAGINFER_PORT`, `RERANKER` (`jina` default | `bge`),
-`EMBEDDER` (`bge`), `RAGINFER_WARMUP` (`1` default — loads + warms both models at
-startup so the first real request is on the warm path).
+Env knobs: `DEPLOY_MODE` (`local` default | `aws`), `RAGINFER_HOST` / `RAGINFER_PORT`,
+`RERANKER` (`jina` default | `bge`), `EMBEDDER` (`bge`), `RAGINFER_WARMUP` (`1` default —
+loads + warms both models at startup so the first real request is on the warm path).
 
 Container builds live in `infra/` — see [`infra/README.md`](infra/README.md). Two
 image shapes from one `Dockerfile` via `--build-arg BAKE_MODELS`: fat (weights
 baked in) vs slim (weights referenced from S3/volume at runtime). The seam is
 `HF_HOME` — the service always reads weights from the HF cache, so build-time
-bake and runtime sync are interchangeable.
+bake and runtime sync are interchangeable. The `Dockerfile` is **multi-arch**
+(`TARGETARCH`): x86_64 pins the CPU torch index, **arm64/Graviton** uses the PyPI
+aarch64 CPU wheel. AWS deployment (ECS Fargate, ARM64, VPC-internal, optional
+scheduled scale-to-zero) is analyzed in
+[`docs/aws-deployment-plan.md`](docs/aws-deployment-plan.md); the Fargate contract +
+task-def template live in [`infra/aws/`](infra/aws/).
 
 ## Architecture
 
@@ -62,7 +68,24 @@ The request path is thin; the weight is in the model wrappers.
 
 - **Startup warm-up.** [server.py](src/service/server.py) loads and runs a tiny
   inference on both models before serving (best-effort; a load failure is logged,
-  not fatal, and `/healthz` reports per-model `*_loaded` state).
+  not fatal, and `/healthz` reports per-model `*_loaded` state). `/healthz` is
+  always-200 **liveness**; `/readyz` is **readiness** — 503 until both models load
+  — and is the intended load-balancer / ECS target-group health check.
+
+- **One config seam for local ↔ AWS.** [src/config/settings.py](src/config/settings.py)
+  is a typed `Settings` driven by `DEPLOY_MODE` (`local` default | `aws`).
+  `DEPLOY_MODE` only supplies *defaults* — every legacy env var
+  (`RAGINFER_HOST`, `RERANKER`, `EMBEDDER`, `MODEL_SOURCE`, `RAGINFER_WARMUP`,
+  `LOG_LEVEL`, …) still wins when set, so local behavior is unchanged. In `aws`:
+  bind `0.0.0.0`, **JSON logs to stdout** (no rotating file, for CloudWatch — see
+  [logging_config.py](src/logging_config.py)), and the storage backend defaults to
+  S3. Read config through `get_settings()`, not ad-hoc `os.getenv`.
+
+- **Storage seam (forward-looking).** [src/storage/__init__.py](src/storage/__init__.py)
+  (`LocalStorage` | `S3Storage` via `build_storage`) is the local-FS↔S3 adapter for
+  *future* blob IO. The `/embed` `/rerank` path does no blob IO today, and **model
+  weights deliberately do NOT go through it** — they load from `HF_HOME` via
+  `MODEL_SOURCE` (baked/hf/s3), because `from_pretrained` needs a real directory.
 
 ### Memory-safety invariants (the reason this service exists — don't regress them)
 

@@ -15,6 +15,7 @@ import time
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from src.embedders import BaseEmbedder, build_embedder
 from src.rerankers import BaseReranker, build_reranker
@@ -79,6 +80,27 @@ def healthz() -> HealthResponse:
         reranker_loaded=rr is not None,
         embedder_loaded=emb is not None,
     )
+
+
+@app.get("/readyz")
+def readyz() -> JSONResponse:
+    """Readiness probe for load balancers / ECS target-group health checks.
+
+    Unlike ``/healthz`` (always 200 while the process is up = liveness), this
+    returns **503 until both default models are loaded**, so a balancer won't
+    route traffic to a task that is still warming up or syncing weights.
+    """
+    rr = _rerankers.get("default")
+    emb = _embedders.get("default")
+    ready = rr is not None and emb is not None
+    body = {
+        "status": "ready" if ready else "loading",
+        "reranker": rr.model_name if rr else "(not loaded)",
+        "embedder": emb.model_name if emb else "(not loaded)",
+        "reranker_loaded": rr is not None,
+        "embedder_loaded": emb is not None,
+    }
+    return JSONResponse(body, status_code=200 if ready else 503)
 
 
 @app.post("/rerank", response_model=RerankResponse)

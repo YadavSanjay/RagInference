@@ -23,9 +23,12 @@ change what's behind it.
 
 ## The size levers (why the image isn't 8 GB)
 
-1. **CPU-only torch** — installed from `download.pytorch.org/whl/cpu`, *before*
-   the other requirements, so no CUDA/`nvidia-*` wheels are ever pulled. ~200 MB
-   instead of ~2.5 GB. Single biggest win, applies to **both** cases.
+1. **CPU-only torch** — installed *before* the other requirements so no
+   CUDA/`nvidia-*` wheels are ever pulled (~200 MB instead of ~2.5 GB). Single
+   biggest win, applies to **both** cases. The source is **arch-aware**
+   (`TARGETARCH`): x86_64 pins the `download.pytorch.org/whl/cpu` index; **arm64
+   (Graviton)** uses the default PyPI wheel, which is already CPU-only for aarch64
+   and carries the Arm Compute Library optimizations.
 2. **Multi-stage build** — `build-essential` and the download tooling live in
    the builder stage; the runtime image is `python:3.12-slim` + venv + code.
 3. **Trimmed snapshots** — [`download_models.py`](download_models.py) ignores
@@ -42,6 +45,18 @@ change what's behind it.
 docker build -f infra/Dockerfile --build-arg BAKE_MODELS="bge jina" -t raginfer:fat .
 docker run --rm -p 8799:8799 raginfer:fat
 # add the bge reranker too:  --build-arg BAKE_MODELS="bge jina bge-reranker"
+```
+
+### ARM64 / Graviton builds (recommended for AWS Fargate)
+
+Fargate ARM (Graviton) is ~20% cheaper than x86 for the same vCPU/GB and is the
+recommended target (see [`infra/aws/`](aws/)). Build for arm64 with buildx — the
+Dockerfile's `TARGETARCH` branch picks the aarch64 CPU torch wheel automatically:
+
+```bash
+# slim, arm64, pushed to ECR (multi-arch also possible: --platform linux/amd64,linux/arm64)
+docker buildx build -f infra/Dockerfile --platform linux/arm64 \
+    -t <acct>.dkr.ecr.<region>.amazonaws.com/raginfer:slim-arm64 --push .
 ```
 
 At runtime `MODEL_SOURCE=baked` (the default) sets `HF_HUB_OFFLINE=1` — the

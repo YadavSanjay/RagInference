@@ -21,8 +21,12 @@ copies and serializes calls so the two servers stop contending.
 
 ```
 src/
-  __init__.py            # configure_logging + load_dotenv; DEFAULT_RERANKER/EMBEDDER
-  logging_config.py      # stderr-only logging
+  __init__.py            # load_dotenv + configure_logging (settings-aware); DEFAULT_RERANKER/EMBEDDER
+  logging_config.py      # local: stderr + rotating file; aws: JSON to stdout (CloudWatch)
+  config/
+    settings.py          # typed Settings + DEPLOY_MODE (local|aws); one switch, legacy env preserved
+  storage/
+    __init__.py          # Storage seam: LocalStorage | S3Storage (build_storage); future blob IO
   embedders/
     base_embedder.py     # embed(texts, dense, sparse) -> list[{dense, sparse}]
     bge_embedder.py      # BAAI/bge-m3 dense+sparse (default)
@@ -34,10 +38,12 @@ src/
     __init__.py          # build_reranker(name)
   service/
     schemas.py           # Embed/Rerank/Health wire models
-    app.py               # FastAPI: POST /embed, POST /rerank, GET /healthz
+    app.py               # FastAPI: POST /embed, POST /rerank, GET /healthz, GET /readyz
     server.py            # uvicorn entrypoint + startup warm-up (both models)
 configs/logging.yaml
-test/
+infra/                   # containerization + AWS (infra/aws/) — see infra/README.md
+docs/aws-deployment-plan.md  # local + AWS deployment analysis / plan / change list
+test/                    # test_service.py, test_settings.py (stub models, no weights)
 ```
 
 ## Run
@@ -50,6 +56,9 @@ RAGINFER_HOST=0.0.0.0 RAGINFER_PORT=8799 RERANKER=jina EMBEDDER=bge \
 ```
 
 Env:
+- `DEPLOY_MODE` — `local` (default) | `aws`. In `aws` it derives cloud-friendly
+  defaults (bind `0.0.0.0`, JSON logs to stdout, no log file, S3 storage backend);
+  any explicit var below still overrides. Local behavior is unchanged when unset.
 - `RAGINFER_HOST` (default `127.0.0.1`) / `RAGINFER_PORT` (default `8799`)
 - `RERANKER` — `jina` (default) | `bge`
 - `EMBEDDER` — `bge` (default)
@@ -74,6 +83,22 @@ Env:
 → `{ "scores": [0.91, 0.12], "model": "jinaai/jina-reranker-v3", "count": 2 }`
 
 `GET /healthz` → `{ "status": "ok", "embedder": "...", "reranker": "...", "embedder_loaded": true, "reranker_loaded": true }`
+(always 200 while the process is up = **liveness**.)
+
+`GET /readyz` → same body, but **503 until both default models are loaded**, then 200
+(= **readiness**; used as the load-balancer / ECS target-group health check so traffic
+only lands on a warm task).
+
+## Deployment (local & AWS)
+
+The same image runs unchanged locally and on AWS; `DEPLOY_MODE` flips the defaults.
+The chosen cloud target is **ECS Fargate (CPU, ARM64/Graviton — ~20% cheaper), VPC-internal**,
+with optional **scheduled scale-to-zero** off-hours (load is batch-tolerant).
+
+- Full analysis, change list, and the **AWS services the infra project must provision**:
+  [`docs/aws-deployment-plan.md`](docs/aws-deployment-plan.md).
+- Container build (fat vs slim, ARM64 buildx recipe): [`infra/README.md`](infra/README.md).
+- Fargate contract, task-def template, scheduled scale-to-zero: [`infra/aws/`](infra/aws/).
 
 ## Clients
 

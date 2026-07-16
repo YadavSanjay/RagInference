@@ -171,8 +171,16 @@ Response:
 
 Returns `status`, the `embedder` / `reranker` model names, and
 `embedder_loaded` / `reranker_loaded` booleans. Always returns `200` while the
-process is up, even before models load — read the `*_loaded` flags to know
-readiness.
+process is up, even before models load — this is a **liveness** check. Read the
+`*_loaded` flags (or use `/readyz`) to know readiness.
+
+### `GET /readyz`
+
+Same body as `/healthz`, but a **readiness** check: returns **`503` until both
+default models are loaded**, then `200`. This is what a load balancer or AWS ECS
+target group should poll, so traffic only reaches a task once it is warm (weights
+synced + warm-up done). As a client you normally just use `/healthz` + the
+`*_loaded` flags; `/readyz` mainly matters to operators wiring health checks.
 
 ### Selecting a non-default model
 
@@ -323,12 +331,17 @@ Environment variables:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `RAGINFER_HOST` | `127.0.0.1` | Bind address. **Use `0.0.0.0` to allow remote clients.** |
+| `DEPLOY_MODE` | `local` | `aws` derives cloud defaults: bind `0.0.0.0`, JSON logs to stdout (CloudWatch), no log file, S3 storage backend. Any explicit var below still overrides. |
+| `RAGINFER_HOST` | `127.0.0.1` | Bind address. **Use `0.0.0.0` to allow remote clients** (auto in `aws` mode). |
 | `RAGINFER_PORT` | `8799` | Bind port (clients' `RAGINFER_URL` must match). |
 | `RERANKER` | `jina` | Default reranker (`jina` \| `bge`). |
 | `EMBEDDER` | `bge` | Default embedder (`bge`). |
 | `RAGINFER_WARMUP` | `1` | `1` loads + warms both models at startup; `0`/`false` defers to first request. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity. |
+
+Running on AWS (ECS Fargate, VPC-internal) is covered in
+[`../docs/aws-deployment-plan.md`](aws-deployment-plan.md) and [`../infra/aws/`](../infra/aws/);
+in `aws` mode logs go to CloudWatch (stdout) rather than `logs/raginference.log`.
 
 Operator checklist when a client can't connect:
 

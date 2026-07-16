@@ -35,10 +35,21 @@ RUN apt-get update \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 1) CPU-only torch FIRST, from the dedicated CPU wheel index. Installing it
-#    up front means the requirements install below sees torch already
-#    satisfied and never pulls the multi-GB CUDA build as a transitive dep.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
+# 1) CPU-only torch FIRST so the requirements install below sees it satisfied
+#    and never pulls a multi-GB CUDA build as a transitive dep. The source is
+#    arch-dependent:
+#      * x86_64 (amd64): the dedicated CPU wheel index — the default PyPI wheel
+#        is CUDA-enabled (~2.5 GB), so we must pin the cpu index.
+#      * arm64 (Graviton): the default PyPI wheel is *already* CPU-only (no CUDA
+#        exists for aarch64) and carries the Arm Compute Library optimizations,
+#        so we install it straight from PyPI. Verified wheel:
+#        torch-*-cp312-manylinux_2_28_aarch64.whl.
+#    TARGETARCH is provided automatically by buildx for multi-arch builds.
+ARG TARGETARCH
+RUN case "${TARGETARCH:-amd64}" in \
+      arm64) pip install torch ;; \
+      *)     pip install --index-url https://download.pytorch.org/whl/cpu torch ;; \
+    esac
 
 # 2) The rest of the service requirements + the hub client used to fetch models
 #    (hf_transfer gives much faster parallel snapshot downloads).
@@ -72,8 +83,21 @@ RUN mkdir -p /models \
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # tini gives us proper PID 1 signal handling (clean SIGTERM -> uvicorn shutdown).
+# s5cmd is baked in for the slim/S3 weight-sync path (entrypoint.sh prefers it
+# over the aws CLI). It's a ~15 MB static binary; unused/harmless in the fat
+# (baked, offline) image. ca-certificates stays for runtime TLS to S3.
+# TARGETARCH is provided automatically by buildx for multi-arch builds.
+ARG TARGETARCH
+ARG S5CMD_VERSION=2.2.2
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tini \
+    && apt-get install -y --no-install-recommends tini ca-certificates curl \
+    && case "${TARGETARCH:-amd64}" in \
+         arm64) S5_ARCH="Linux-arm64" ;; \
+         *)     S5_ARCH="Linux-64bit" ;; \
+       esac \
+    && curl -sSL "https://github.com/peak/s5cmd/releases/download/v${S5CMD_VERSION}/s5cmd_${S5CMD_VERSION}_${S5_ARCH}.tar.gz" \
+       | tar -xz -C /usr/local/bin s5cmd \
+    && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/opt/venv/bin:$PATH" \

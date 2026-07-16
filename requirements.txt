@@ -2,9 +2,14 @@
 fastapi
 uvicorn
 pydantic>=2
+pydantic-settings>=2        # typed Settings / DEPLOY_MODE (local vs aws)
 python-dotenv
 pyyaml
 httpx
+
+# Deployment (AWS mode; harmless locally)
+python-json-logger          # JSON logs to stdout for CloudWatch (DEPLOY_MODE=aws)
+boto3                        # S3 artifact-storage seam (src/storage; lazy-imported)
 
 # Models
 torch

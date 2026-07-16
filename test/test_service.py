@@ -53,6 +53,26 @@ def test_healthz_reports_both_models(client):
     assert body["embedder"] == "stub/embedder" and body["embedder_loaded"] is True
 
 
+def test_readyz_200_when_models_loaded(client):
+    r = client.get("/readyz")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ready"
+    assert body["reranker_loaded"] is True and body["embedder_loaded"] is True
+
+
+def test_readyz_503_before_models_loaded(monkeypatch):
+    # no stubs injected -> caches empty -> not ready
+    monkeypatch.setattr(app_module, "_rerankers", {})
+    monkeypatch.setattr(app_module, "_embedders", {})
+    c = TestClient(app_module.app)
+    r = c.get("/readyz")
+    assert r.status_code == 503
+    body = r.json()
+    assert body["status"] == "loading"
+    assert body["reranker_loaded"] is False and body["embedder_loaded"] is False
+
+
 def test_rerank_returns_aligned_scores(client):
     r = client.post("/rerank", json={"query": "q", "documents": ["aa", "bbbb", "c"]})
     assert r.status_code == 200
