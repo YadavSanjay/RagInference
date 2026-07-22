@@ -32,7 +32,7 @@ client services (same VPC)
 | **Readiness** | `GET /readyz` → **503 until both models loaded**, then 200 |
 | Health check start period | **≥ 300 s** (weight sync + warm-up on cold start) |
 | CPU / memory | 4 vCPU / 16 GB (both models ≈ 4 GB weights + torch overhead) |
-| Architecture | `ARM64` preferred (~20% cheaper); `X86_64` also fine |
+| Architecture | **`ARM64` (Graviton, ~20% cheaper)** — the pushed image **must** be built `--platform linux/arm64` and the task def's `runtimePlatform.cpuArchitecture` **must** match it, or the task fails with `exec format error`. Verify: `docker buildx imagetools inspect <image> \| grep -i platform`. |
 | Stop timeout | ≥ 30 s (clean SIGTERM via tini → uvicorn) |
 
 ### Task environment (from SSM Parameter Store / Secrets Manager)

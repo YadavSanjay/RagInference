@@ -12,7 +12,7 @@ Two weight-delivery strategies, both produced from a **single parameterized
 | | **Case A — fat / self-contained** | **Case B — slim / referenced** |
 |---|---|---|
 | Weights | Baked into the image at build | In S3 / shared volume, synced at runtime |
-| Image size | ~4–6 GB | **~1–1.5 GB** |
+| Image size | ~6.5 GB (est. = slim + ~4 GB weights) | **~2.4 GB** (measured) |
 | Cold start | Fastest (no fetch) | First run pays a sync/download |
 | Runtime deps | None (air-gap OK) | Object store + credentials |
 | Weight update | Rebuild + repush whole image | Update S3; restart, no rebuild |

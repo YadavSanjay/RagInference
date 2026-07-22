@@ -128,10 +128,14 @@ USER raginfer
 
 EXPOSE 8799
 
-# Container-level liveness: hit the service's own /healthz.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+# Container health = READINESS (/readyz), not liveness (/healthz).
+# /healthz is always-200 while the process is up, so using it here would report
+# "healthy" for a container whose models failed to load — exactly the silent
+# failure we must not ship. /readyz is 503 until both models are loaded.
+# start-period covers weight sync + warm-up on a cold start.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
     CMD python -c "import os,urllib.request,sys; \
-url='http://127.0.0.1:%s/healthz'%os.getenv('RAGINFER_PORT','8799'); \
+url='http://127.0.0.1:%s/readyz'%os.getenv('RAGINFER_PORT','8799'); \
 sys.exit(0 if urllib.request.urlopen(url, timeout=4).status==200 else 1)" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

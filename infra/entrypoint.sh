@@ -26,6 +26,18 @@ log() { echo "[entrypoint] $*" >&2; }
 
 case "$MODEL_SOURCE" in
   baked)
+    # Fail fast on the classic footgun: a *slim* image (no baked weights) run
+    # with the default MODEL_SOURCE=baked. Offline + empty cache means every
+    # model load fails and the service would otherwise sit up-but-useless.
+    if [ -z "$(ls -A "$HF_HOME" 2>/dev/null)" ]; then
+      log "ERROR: MODEL_SOURCE=baked but $HF_HOME is EMPTY — no weights to load."
+      log "       This is a slim image without weights. Either:"
+      log "         * run the fat image (built with --build-arg BAKE_MODELS=\"bge jina\"), or"
+      log "         * set MODEL_SOURCE=s3 + MODEL_S3_URI=s3://<bucket> to sync at startup, or"
+      log "         * mount a pre-populated weights volume at \$HF_HOME, or"
+      log "         * set MODEL_SOURCE=hf to download from HuggingFace Hub."
+      exit 1
+    fi
     export HF_HUB_OFFLINE=1
     log "MODEL_SOURCE=baked -> using weights in image at $HF_HOME (offline)"
     ;;

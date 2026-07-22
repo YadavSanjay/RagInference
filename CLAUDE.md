@@ -37,10 +37,16 @@ baked in) vs slim (weights referenced from S3/volume at runtime). The seam is
 `HF_HOME` — the service always reads weights from the HF cache, so build-time
 bake and runtime sync are interchangeable. The `Dockerfile` is **multi-arch**
 (`TARGETARCH`): x86_64 pins the CPU torch index, **arm64/Graviton** uses the PyPI
-aarch64 CPU wheel. AWS deployment (ECS Fargate, ARM64, VPC-internal, optional
-scheduled scale-to-zero) is analyzed in
+aarch64 CPU wheel. Measured sizes: slim ~2.4 GB, fat ~6.5 GB. AWS deployment
+(ECS Fargate, ARM64, VPC-internal, optional scheduled scale-to-zero) is analyzed in
 [`docs/aws-deployment-plan.md`](docs/aws-deployment-plan.md); the Fargate contract +
-task-def template live in [`infra/aws/`](infra/aws/).
+task-def template live in [`infra/aws/`](infra/aws/); the build → ECR → EC2/Fargate
+runbook is [`docs/deployment-guide.md`](docs/deployment-guide.md).
+
+The container **fails fast** if `MODEL_SOURCE=baked` but `HF_HOME` is empty (slim
+image with no weights), and its `HEALTHCHECK` is bound to **`/readyz`**, not
+`/healthz` — an always-200 liveness probe would report a model-less container as
+healthy. Don't regress either.
 
 ## Architecture
 

@@ -21,6 +21,8 @@ image tradeoff on AWS, and a concrete phased change list.
 > - ✅ `s5cmd` baked into the image (arch-aware) for the slim/S3 sync, **plus arch-aware CPU torch** (x86 → cpu index; **arm64/Graviton → PyPI aarch64 wheel**) — [`infra/Dockerfile`](../infra/Dockerfile). ARM is the committed Fargate target (~20% cheaper, par performance).
 > - ✅ Fargate contract + scheduled scale-to-zero reference + task-def template — [`infra/aws/`](../infra/aws/).
 > - ✅ Tests — [`test/test_settings.py`](../test/test_settings.py) + `/readyz` cases in `test/test_service.py` (17 pass, no weights loaded).
+> - ✅ **Image built & run-verified** (slim, amd64, ~2.4 GB): non-root, `/healthz` 200, `/readyz` 503→gated, JSON logs to stdout under `DEPLOY_MODE=aws`. Two defects found & fixed — container `HEALTHCHECK` now uses `/readyz` (it reported *healthy* with zero models loaded), and the entrypoint **fails fast** when `MODEL_SOURCE=baked` but `HF_HOME` is empty.
+> - ✅ **Packaging/deployment runbook** — [`docs/deployment-guide.md`](deployment-guide.md): local build, ECR repo/login/tag/push, **ECR pull setup** (IAM instance profile, credential helper, private-subnet VPC endpoints), EC2 run + systemd, env reference, troubleshooting.
 > - ⬜ **Needs live AWS (separate infra project):** ECR multi-arch push, ECS/ALB/S3/IAM provisioning, the scheduled-action registration, CloudWatch dashboards.
 
 ---
@@ -233,8 +235,8 @@ existing tradeoff table onto AWS:
 
 | | Fat (baked) | Slim (S3-referenced) |
 |---|---|---|
-| ECR image | ~4–6 GB | ~1–1.5 GB |
-| ECR storage cost | ~$0.5/mo | ~$0.15/mo (trivial either way) |
+| ECR image | ~6.5 GB (est. = slim + ~4 GB weights) | **~2.4 GB** (measured) |
+| ECR storage cost | ~$0.65/mo | ~$0.24/mo (trivial either way) |
 | Cold start | image pull only | image pull **+ ~4 GB S3 sync** |
 | Weight update | rebuild + repush | update S3, restart — **no rebuild** |
 | Runtime deps | none | S3 access (VPC endpoint + IAM) |
