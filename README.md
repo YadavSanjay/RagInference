@@ -95,7 +95,9 @@ The same image runs unchanged locally and on AWS; `DEPLOY_MODE` flips the defaul
 The chosen cloud target is **ECS Fargate (CPU, ARM64/Graviton — ~20% cheaper), VPC-internal**,
 with optional **scheduled scale-to-zero** off-hours (load is batch-tolerant).
 
-- **Step-by-step runbook** — build → push to ECR → pull on a host → run on EC2/Fargate:
+- **Copy-paste runbook** — local amd64 build/run + AWS arm64 build & push to ECR:
+  [`docs/runbook/build-and-push-ecr.md`](docs/runbook/build-and-push-ecr.md).
+- **Full deployment guide** — build → push to ECR → pull on a host → run on EC2/Fargate:
   [`docs/deployment-guide.md`](docs/deployment-guide.md).
 - Full analysis, change list, and the **AWS services the infra project must provision**:
   [`docs/aws-deployment-plan.md`](docs/aws-deployment-plan.md).

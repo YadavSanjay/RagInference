@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .env
+# local deploy overrides (real AWS account id, profile) — never commit
+infra/aws/deploy.env
 logs/
 .pytest_cache/
 .venv/

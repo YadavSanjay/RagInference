@@ -8,6 +8,10 @@ For *why* the architecture is what it is (CPU vs GPU cost, hosting options), see
 fat/slim tradeoff, see [`../infra/README.md`](../infra/README.md). For the Fargate
 service contract specifically, see [`../infra/aws/README.md`](../infra/aws/README.md).
 
+> **Just want the exact commands we run?** The copy-paste build/push runbook
+> (local amd64 + AWS arm64 → ECR) is [`runbook/build-and-push-ecr.md`](runbook/build-and-push-ecr.md).
+> This guide is the fuller reference behind it.
+
 ---
 
 ## 0. What you are deploying
