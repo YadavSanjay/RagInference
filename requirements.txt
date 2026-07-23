@@ -13,6 +13,12 @@ boto3                        # S3 artifact-storage seam (src/storage; lazy-impor
 
 # Models
 torch
-transformers>=4.44
+# Upper-bounded: transformers >=4.57 changed tied-weight finalization
+# (mark_tied_weights_as_initialized), which breaks jina-reranker-v3's
+# trust_remote_code model at load ("Identity has no attribute 'weight'"). The
+# embedder is unaffected, so a slim-image deploy warms BGE but the reranker never
+# loads and /readyz stays 503. 4.56.2 is verified to load both models (online and
+# offline). Revisit when jina-reranker-v3's remote code supports newer transformers.
+transformers>=4.56.2,<4.57
 einops          # required by jina-reranker-v3 remote code
 FlagEmbedding   # BGE-M3 embedder (default) + bge-reranker-v2-m3 (RERANKER=bge)
