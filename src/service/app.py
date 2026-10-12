@@ -34,6 +34,15 @@ logger = get_logger(__name__)
 
 _rerank_lock = threading.Lock()
 _embed_lock = threading.Lock()
+# Inference locks — distinct from the build locks above. The sync endpoints run
+# on FastAPI's threadpool, so without these, overlapping requests would run
+# concurrent forward passes on one model: each uses every core (torch
+# intra-op threads), so they oversubscribe the CPU and multiply activation
+# memory. Serializing per model keeps one forward in flight; extra requests
+# queue here (FIFO-ish) and the wait is logged. Embed and rerank stay separate
+# so a sub-second query embed doesn't wait behind a multi-minute rerank.
+_rerank_infer_lock = threading.Lock()
+_embed_infer_lock = threading.Lock()
 _rerankers: dict[str, BaseReranker] = {}
 _embedders: dict[str, BaseEmbedder] = {}
 
@@ -111,10 +120,13 @@ def rerank(req: RerankRequest) -> RerankResponse:
         raise HTTPException(status_code=422, detail=str(exc))
     if not req.documents:
         return RerankResponse(scores=[], model=rr.model_name, count=0)
-    t0 = time.time()
-    scores = rr.rerank(req.query, req.documents)
-    logger.info("rerank: model=%s docs=%d took=%.1fs query=%r",
-                rr.model_name, len(req.documents), time.time() - t0, req.query[:80])
+    t_wait = time.time()
+    with _rerank_infer_lock:
+        t0 = time.time()
+        scores = rr.rerank(req.query, req.documents)
+    logger.info("rerank: model=%s docs=%d waited=%.1fs took=%.1fs query=%r",
+                rr.model_name, len(req.documents), t0 - t_wait, time.time() - t0,
+                req.query[:80])
     return RerankResponse(scores=scores, model=rr.model_name, count=len(scores))
 
 
@@ -126,8 +138,11 @@ def embed(req: EmbedRequest) -> EmbedResponse:
         raise HTTPException(status_code=422, detail=str(exc))
     if not req.texts:
         return EmbedResponse(embeddings=[], model=emb.model_name, count=0)
-    t0 = time.time()
-    raw = emb.embed(req.texts, dense=req.dense, sparse=req.sparse)
+    t_wait = time.time()
+    with _embed_infer_lock:
+        t0 = time.time()
+        raw = emb.embed(req.texts, dense=req.dense, sparse=req.sparse)
+    waited = t0 - t_wait
     items = [
         EmbeddingItem(
             dense=r.get("dense"),
@@ -135,6 +150,7 @@ def embed(req: EmbedRequest) -> EmbedResponse:
         )
         for r in raw
     ]
-    logger.info("embed: model=%s texts=%d dense=%s sparse=%s took=%.2fs",
-                emb.model_name, len(req.texts), req.dense, req.sparse, time.time() - t0)
+    logger.info("embed: model=%s texts=%d dense=%s sparse=%s waited=%.2fs took=%.2fs",
+                emb.model_name, len(req.texts), req.dense, req.sparse, waited,
+                time.time() - t0)
     return EmbedResponse(embeddings=items, model=emb.model_name, count=len(items))

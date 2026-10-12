@@ -19,6 +19,7 @@ _VARS = [
     "DEPLOY_MODE", "RAGINFER_DEPLOY_MODE",
     "RAGINFER_HOST", "RAGINFER_PORT",
     "EMBEDDER", "RAGINFER_EMBEDDER", "RERANKER", "RAGINFER_RERANKER", "RAGINFER_WARMUP",
+    "RERANKER_DTYPE", "RAGINFER_RERANKER_DTYPE",
     "MODEL_SOURCE", "MODEL_S3_URI", "HF_HOME",
     "RAGINFER_ARTIFACT_BACKEND", "RAGINFER_ARTIFACT_ROOT", "RAGINFER_ARTIFACT_BUCKET",
     "RAGINFER_ARTIFACT_PREFIX",
@@ -80,6 +81,21 @@ def test_legacy_env_names_still_read(clean_env):
     assert s.reranker == "bge" and s.embedder == "bge"
     assert s.model_source == "s3" and s.model_s3_uri == "s3://raginfer-models"
     assert s.warmup is False
+
+
+def test_reranker_dtype_defaults_to_float32_in_both_modes(clean_env):
+    # fp32 by default: bf16 is emulated (slower) on CPUs without native bf16.
+    assert _settings().reranker_dtype == "float32"
+    clean_env.setenv("DEPLOY_MODE", "aws")
+    assert _settings().reranker_dtype == "float32"
+
+
+def test_reranker_dtype_override_and_validation(clean_env):
+    clean_env.setenv("RERANKER_DTYPE", "auto")
+    assert _settings().reranker_dtype == "auto"
+    clean_env.setenv("RERANKER_DTYPE", "fp16")  # not an allowed value -> raises
+    with pytest.raises(ValueError):
+        _settings()
 
 
 def test_build_storage_local(clean_env):

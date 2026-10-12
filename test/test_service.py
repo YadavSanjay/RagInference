@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -110,6 +113,67 @@ def test_embed_empty_texts(client):
     r = client.post("/embed", json={"texts": []})
     assert r.status_code == 200
     assert r.json()["embeddings"] == []
+
+
+class _ConcurrencyProbe:
+    """Records the peak number of calls in flight at once."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.active = 0
+        self.peak = 0
+
+    def __enter__(self):
+        with self._lock:
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+
+    def __exit__(self, *exc):
+        time.sleep(0.05)  # hold the "forward pass" open so overlaps would show
+        with self._lock:
+            self.active -= 1
+
+
+def _fire_concurrently(fn, n=4):
+    threads = [threading.Thread(target=fn) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def test_concurrent_reranks_are_serialized(monkeypatch):
+    probe = _ConcurrencyProbe()
+
+    class _SlowReranker(_StubReranker):
+        def rerank(self, query, documents):
+            with probe:
+                return super().rerank(query, documents)
+
+    monkeypatch.setattr(app_module, "_rerankers", {"default": _SlowReranker()})
+    c = TestClient(app_module.app)
+    statuses = []
+    _fire_concurrently(lambda: statuses.append(
+        c.post("/rerank", json={"query": "q", "documents": ["aa"]}).status_code))
+    assert statuses == [200] * 4
+    assert probe.peak == 1
+
+
+def test_concurrent_embeds_are_serialized(monkeypatch):
+    probe = _ConcurrencyProbe()
+
+    class _SlowEmbedder(_StubEmbedder):
+        def embed(self, texts, dense=True, sparse=True):
+            with probe:
+                return super().embed(texts, dense, sparse)
+
+    monkeypatch.setattr(app_module, "_embedders", {"default": _SlowEmbedder()})
+    c = TestClient(app_module.app)
+    statuses = []
+    _fire_concurrently(lambda: statuses.append(
+        c.post("/embed", json={"texts": ["abc"]}).status_code))
+    assert statuses == [200] * 4
+    assert probe.peak == 1
 
 
 def test_rerank_unknown_model_is_422(client, monkeypatch):

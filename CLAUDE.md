@@ -29,7 +29,9 @@ conda run -n py312 python -m pytest test/test_settings.py -q            # DEPLOY
 
 Env knobs: `DEPLOY_MODE` (`local` default | `aws`), `RAGINFER_HOST` / `RAGINFER_PORT`,
 `RERANKER` (`jina` default | `bge`), `EMBEDDER` (`bge`), `RAGINFER_WARMUP` (`1` default —
-loads + warms both models at startup so the first real request is on the warm path).
+loads + warms both models at startup so the first real request is on the warm path),
+`RERANKER_DTYPE` (`float32` default | `bfloat16` | `auto` — Jina ships bf16 weights, but
+bf16 is emulated and ~1.8x slower on CPUs without native bf16, e.g. the x86 dev box).
 
 Container builds live in `infra/` — see [`infra/README.md`](infra/README.md). Two
 image shapes from one `Dockerfile` via `--build-arg BAKE_MODELS`: fat (weights
@@ -71,6 +73,13 @@ The request path is thin; the weight is in the model wrappers.
   `"default"` and by model name. This is what makes it *shared* — do not
   introduce per-request construction or multiple uvicorn workers; scale with
   replicas, not workers (each worker = another full copy of the weights).
+
+- **Inference is serialized per model.** The endpoints are sync `def` (FastAPI
+  threadpool), so `/rerank` and `/embed` each hold a separate inference lock
+  around the forward pass. Concurrent forwards on one model would oversubscribe
+  the CPU (each uses every core) and multiply activation memory. Queued time is
+  logged as `waited=` next to `took=`. Embed and rerank are separate locks on
+  purpose, so a sub-second query embed doesn't wait behind a minutes-long rerank.
 
 - **Startup warm-up.** [server.py](src/service/server.py) loads and runs a tiny
   inference on both models before serving (best-effort; a load failure is logged,

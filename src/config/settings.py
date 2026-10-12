@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     embedder: str = Field("bge", validation_alias=AliasChoices("EMBEDDER", "RAGINFER_EMBEDDER"))
     reranker: str = Field("jina", validation_alias=AliasChoices("RERANKER", "RAGINFER_RERANKER"))
     warmup: bool = Field(True, validation_alias=AliasChoices("RAGINFER_WARMUP"))
+    # jina-reranker-v3 ships bf16 weights; on CPUs without native bf16 (most
+    # x86, e.g. the Windows dev box) bf16 matmuls are emulated and ~1.8x slower
+    # than fp32 with no ranking benefit. "auto" = the checkpoint's own dtype.
+    reranker_dtype: Literal["float32", "bfloat16", "auto"] = Field(
+        "float32", validation_alias=AliasChoices("RERANKER_DTYPE", "RAGINFER_RERANKER_DTYPE")
+    )
 
     # -- weight delivery (mirrors infra/entrypoint.sh) ----------------------- #
     model_source: Literal["baked", "hf", "s3"] = Field(
