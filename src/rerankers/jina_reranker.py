@@ -38,9 +38,17 @@ _BLOCK_TOKEN_BUDGET = 4096
 class JinaReranker(BaseReranker):
     model_name = "jinaai/jina-reranker-v3"
 
-    def __init__(self):
+    def __init__(self, dtype: str | None = None):
+        # Weights ship as bf16. Without native CPU bf16 (most x86) that path is
+        # emulated: measured 61.6s bf16 vs 33.5s fp32 for 8 docs on an
+        # x86 desktop CPU, max score diff 0.003. Hence fp32 by default (RERANKER_DTYPE).
+        if dtype is None:
+            from src.config.settings import get_settings
+
+            dtype = get_settings().reranker_dtype
+        torch_dtype = "auto" if dtype == "auto" else getattr(torch, dtype)
         self.reranker = AutoModel.from_pretrained(
-            "jinaai/jina-reranker-v3", dtype="auto", trust_remote_code=True
+            "jinaai/jina-reranker-v3", dtype=torch_dtype, trust_remote_code=True
         )
         self.reranker.eval()
         # Force the model's internal token-budget blocking to actually engage:
@@ -49,7 +57,8 @@ class JinaReranker(BaseReranker):
         self.reranker._tokenizer.model_max_length = _BLOCK_TOKEN_BUDGET
         logger.info(
             "loaded Jina re-ranker model - jinaai/jina-reranker-v3 "
-            "(block budget=%d tok, per-doc cap=%d tok)",
+            "(dtype=%s, block budget=%d tok, per-doc cap=%d tok)",
+            next(self.reranker.parameters()).dtype,
             _BLOCK_TOKEN_BUDGET,
             _MAX_DOC_TOKENS,
         )
