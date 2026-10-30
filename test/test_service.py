@@ -11,6 +11,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from src.config.settings import Settings
 from src.embedders.base_embedder import BaseEmbedder
 from src.rerankers.base_reranker import BaseReranker
 from src.service import app as app_module
@@ -89,6 +90,48 @@ def test_rerank_empty_documents(client):
     r = client.post("/rerank", json={"query": "q", "documents": []})
     assert r.status_code == 200
     assert r.json()["scores"] == []
+
+
+@pytest.fixture()
+def tight_limits(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "get_settings",
+        lambda: Settings(_env_file=None, max_items=2, max_text_chars=5),
+    )
+
+
+def test_defaults_clear_what_clients_send():
+    # MacroRAG reranks at most 24 candidates; XbrlRag's vector load sends 400+ texts at once.
+    assert Settings(_env_file=None).max_items >= 1000
+    assert Settings(_env_file=None).max_text_chars >= 6000
+
+
+def test_rerank_at_the_limits_is_accepted(client, tight_limits):
+    r = client.post("/rerank", json={"query": "q", "documents": ["abcde"]})
+    assert r.status_code == 200
+
+
+def test_rerank_over_item_limit_is_413_counting_the_query(client, tight_limits):
+    r = client.post("/rerank", json={"query": "q", "documents": ["a", "b"]})
+    assert r.status_code == 413
+    assert "RAGINFER_MAX_ITEMS" in r.json()["detail"]
+
+
+def test_rerank_over_length_query_is_413(client, tight_limits):
+    r = client.post("/rerank", json={"query": "abcdef", "documents": ["a"]})
+    assert r.status_code == 413
+    assert "RAGINFER_MAX_TEXT_CHARS" in r.json()["detail"]
+
+
+def test_embed_over_item_limit_is_413(client, tight_limits):
+    r = client.post("/embed", json={"texts": ["a", "b", "c"]})
+    assert r.status_code == 413
+
+
+def test_embed_over_length_text_is_413(client, tight_limits):
+    r = client.post("/embed", json={"texts": ["abcdef"]})
+    assert r.status_code == 413
 
 
 def test_embed_returns_dense_and_sparse(client):

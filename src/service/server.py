@@ -7,7 +7,7 @@ Run:
         conda run -n py312 python -m src.service.server
 
 Loads the default embedder + reranker once at startup (warm-up), then serves
-``/embed`` and ``/rerank``. Clients (ARag, MacroRAG) point ``RAGINFER_URL`` at
+``/embed`` and ``/rerank``. Clients (XbrlRag, MacroRAG) point ``RAGINFER_URL`` at
 ``http://<host>:<port>`` and call the ``/embed`` / ``/rerank`` paths.
 """
 from __future__ import annotations

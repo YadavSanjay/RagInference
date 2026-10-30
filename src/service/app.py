@@ -1,7 +1,7 @@
 """FastAPI app exposing the shared inference models (embed + rerank).
 
 A single process loads the (default BGE-M3 embedder + Jina reranker) once and
-serves ``POST /embed`` and ``POST /rerank`` to every client, so ARag / MacroRAG
+serves ``POST /embed`` and ``POST /rerank`` to every client, so XbrlRag / MacroRAG
 no longer each load their own multi-GB copies.
 
 Each model is built lazily under a lock on first use and reused thereafter; the
@@ -17,6 +17,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+from src.config.settings import get_settings
 from src.embedders import BaseEmbedder, build_embedder
 from src.rerankers import BaseReranker, build_reranker
 from src.service.schemas import (
@@ -75,6 +76,30 @@ def get_embedder(name: Optional[str] = None) -> BaseEmbedder:
     return emb
 
 
+def _enforce_limits(texts: list[str]) -> None:
+    """Reject a payload over the configured bounds before it reaches a model.
+
+    Args:
+        texts: Every text in the request, including a rerank query.
+
+    Raises:
+        HTTPException: 413 when the count or any single text exceeds its limit.
+    """
+    settings = get_settings()
+    if len(texts) > settings.max_items:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{len(texts)} items exceeds RAGINFER_MAX_ITEMS={settings.max_items}",
+        )
+    longest = max((len(t) for t in texts), default=0)
+    if longest > settings.max_text_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=f"text of {longest} chars exceeds "
+            f"RAGINFER_MAX_TEXT_CHARS={settings.max_text_chars}",
+        )
+
+
 app = FastAPI(title="RagInference", version="0.1.0")
 
 
@@ -114,6 +139,7 @@ def readyz() -> JSONResponse:
 
 @app.post("/rerank", response_model=RerankResponse)
 def rerank(req: RerankRequest) -> RerankResponse:
+    _enforce_limits([req.query, *req.documents])
     try:
         rr = get_reranker(req.model)
     except ValueError as exc:
@@ -132,6 +158,7 @@ def rerank(req: RerankRequest) -> RerankResponse:
 
 @app.post("/embed", response_model=EmbedResponse)
 def embed(req: EmbedRequest) -> EmbedResponse:
+    _enforce_limits(req.texts)
     try:
         emb = get_embedder(req.model)
     except ValueError as exc:

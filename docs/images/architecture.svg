@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 736" width="1040" height="736" role="img" aria-labelledby="t d">
+<title id="t">RagInference architecture</title>
+<desc id="d">RAG clients call a single RagInference process over HTTP with RAGINFER_URL. A FastAPI layer enforces request bounds and exposes /embed, /rerank, /healthz and /readyz. Embed and rerank each take their own inference lock and run on one shared model copy: BGE-M3 for dense and sparse vectors, and jina-reranker-v3 or bge-reranker-v2-m3 for rerank scores. Models are built once and cached. Weights load from the Hugging Face cache at HF_HOME, which is filled by baking them into the image, by downloading from the Hub, or by syncing from S3. DEPLOY_MODE switches local and AWS defaults.</desc>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+<style>
+  svg { --bg:#ffffff; --sec:#eaeef2; --chip:#ffffff; --border:#afb8c1; --text:#1f2328; --muted:#57606a; --arrow:#57606a;
+        --em:#0f766e; --rr:#4338ca; --ops:#b45309; --on-accent:#ffffff; }
+  @media (prefers-color-scheme: dark) {
+    svg { --bg:#0d1117; --sec:#1c2128; --chip:#0d1117; --border:#545d68; --text:#e6edf3; --muted:#9da7b3; --arrow:#9da7b3;
+          --em:#5eead4; --rr:#a5b4fc; --ops:#fcd34d; --on-accent:#0d1117; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; fill: var(--text); }
+  .card { fill: var(--bg); stroke: var(--border); stroke-width: 1.5; }
+  .sec  { fill: var(--sec); stroke: var(--border); stroke-width: 1.5; }
+  .chip { fill: var(--chip); stroke: var(--border); stroke-width: 1.5; }
+  .arrow { fill: none; stroke: var(--arrow); stroke-width: 1.8; }
+  .ah { fill: var(--arrow); }
+  .h { font-size: 15px; font-weight: 700; fill: var(--text); }
+  .sub { font-size: 12.5px; fill: var(--muted); font-style: italic; }
+  .ct { font-size: 13px; font-weight: 600; fill: var(--text); }
+  .cb { font-size: 12px; fill: var(--muted); }
+  .note { font-size: 11.5px; fill: var(--muted); font-style: italic; }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; font-weight: 700; fill: var(--text); }
+  .badge-em { fill: var(--em); } .badge-rr { fill: var(--rr); } .badge-ops { fill: var(--ops); }
+  .badge-t { font-size: 11px; font-weight: 700; fill: var(--on-accent); }
+</style>
+<rect x="0.5" y="0.5" width="1039" height="735" rx="16" class="card"/>
+
+<!-- Clients -->
+<rect x="20" y="20" width="1000" height="96" rx="10" class="sec"/>
+<text x="36" y="42" class="h">RAG clients</text>
+<text x="136" y="42" class="sub">no model weights in the client process</text>
+<rect x="36" y="54" width="308" height="50" rx="7" class="chip"/>
+<text x="190" y="75" class="ct" text-anchor="middle">XbrlRag</text>
+<text x="190" y="93" class="cb" text-anchor="middle">SEC filings: query + vector load</text>
+<rect x="366" y="54" width="308" height="50" rx="7" class="chip"/>
+<text x="520" y="75" class="ct" text-anchor="middle">MacroRAG</text>
+<text x="520" y="93" class="cb" text-anchor="middle">macro research: query + ingest</text>
+<rect x="696" y="54" width="308" height="50" rx="7" class="chip"/>
+<text x="850" y="75" class="ct" text-anchor="middle">Your client</text>
+<text x="850" y="93" class="cb" text-anchor="middle">any language: plain HTTP + JSON</text>
+
+<path d="M520,116 L520,158" class="arrow" marker-end="url(#ah)"/>
+<text x="534" y="142" class="mono">RAGINFER_URL=http://&lt;host&gt;:8799</text>
+
+<!-- Service -->
+<rect x="20" y="160" width="1000" height="388" rx="10" class="sec"/>
+<text x="36" y="182" class="h">RagInference</text>
+<text x="136" y="182" class="sub">one process, one uvicorn worker, one copy of each model; scale with replicas</text>
+
+<rect x="36" y="196" width="968" height="58" rx="7" class="chip"/>
+<text x="52" y="219" class="ct">FastAPI layer</text>
+<text x="52" y="238" class="cb">request bounds: 413 over RAGINFER_MAX_ITEMS / MAX_TEXT_CHARS</text>
+<text x="600" y="219" class="mono">POST /embed</text>
+<text x="710" y="219" class="mono">POST /rerank</text>
+<text x="600" y="240" class="mono">GET /healthz</text>
+<text x="710" y="240" class="mono">GET /readyz</text>
+<text x="820" y="219" class="cb">JSON marshalling only</text>
+<text x="820" y="240" class="cb">liveness, then readiness</text>
+
+<path d="M270,254 L270,276" class="arrow" marker-end="url(#ah)"/>
+<path d="M770,254 L770,276" class="arrow" marker-end="url(#ah)"/>
+
+<!-- Embed lane -->
+<rect x="36" y="278" width="470" height="44" rx="7" class="chip"/>
+<rect x="48" y="290" width="58" height="20" rx="5" class="badge-em"/>
+<text x="77" y="304" class="badge-t" text-anchor="middle">embed</text>
+<text x="118" y="305" class="ct">Inference lock</text>
+<text x="222" y="305" class="cb">one forward pass; queue time logged as waited=</text>
+
+<path d="M270,322 L270,344" class="arrow" marker-end="url(#ah)"/>
+
+<rect x="36" y="346" width="470" height="98" rx="7" class="chip"/>
+<text x="52" y="368" class="ct">BAAI/bge-m3</text>
+<text x="52" y="388" class="cb">dense + sparse vectors, aligned to input order</text>
+<text x="52" y="407" class="cb">caps: batch_size=12, max_length=8192</text>
+<text x="52" y="426" class="note">the library's default batch of 256 segfaults on CPU</text>
+
+<!-- Rerank lane -->
+<rect x="534" y="278" width="470" height="44" rx="7" class="chip"/>
+<rect x="546" y="290" width="58" height="20" rx="5" class="badge-rr"/>
+<text x="575" y="304" class="badge-t" text-anchor="middle">rerank</text>
+<text x="616" y="305" class="ct">Inference lock</text>
+<text x="720" y="305" class="cb">separate, so a query embed never waits on it</text>
+
+<path d="M770,322 L770,344" class="arrow" marker-end="url(#ah)"/>
+
+<rect x="534" y="346" width="470" height="98" rx="7" class="chip"/>
+<text x="550" y="368" class="ct">jinaai/jina-reranker-v3</text>
+<text x="704" y="368" class="cb">or BAAI/bge-reranker-v2-m3</text>
+<text x="550" y="388" class="cb">one score per document, aligned to input order</text>
+<text x="550" y="407" class="cb">caps: 512 tokens per doc, 4,096 tokens per forward pass</text>
+<text x="550" y="426" class="note">listwise: memory grows with total tokens squared</text>
+
+<rect x="36" y="456" width="968" height="78" rx="7" class="chip"/>
+<text x="52" y="478" class="ct">Lazy singleton cache</text>
+<text x="52" y="498" class="cb">each model is built once under a lock, warmed at startup, then shared by every request</text>
+<text x="52" y="518" class="note">/readyz stays 503 until both defaults are loaded, so traffic only lands on a warm process</text>
+
+<path d="M520,548 L520,590" class="arrow" marker-end="url(#ah)"/>
+<text x="534" y="574" class="mono">from_pretrained reads HF_HOME</text>
+
+<!-- Weights + config -->
+<rect x="20" y="592" width="1000" height="124" rx="10" class="sec"/>
+<text x="36" y="614" class="h">Weights and configuration</text>
+<text x="246" y="614" class="sub">one Dockerfile, three delivery routes; the service always reads the same cache</text>
+<rect x="36" y="628" width="226" height="74" rx="7" class="chip"/>
+<rect x="48" y="640" width="88" height="20" rx="5" class="badge-ops"/>
+<text x="92" y="654" class="badge-t" text-anchor="middle">baked</text>
+<text x="48" y="680" class="cb">in a fat image, runs offline</text>
+<rect x="274" y="628" width="226" height="74" rx="7" class="chip"/>
+<rect x="286" y="640" width="88" height="20" rx="5" class="badge-ops"/>
+<text x="330" y="654" class="badge-t" text-anchor="middle">hf</text>
+<text x="286" y="680" class="cb">from the Hub on first start</text>
+<rect x="512" y="628" width="226" height="74" rx="7" class="chip"/>
+<rect x="524" y="640" width="88" height="20" rx="5" class="badge-ops"/>
+<text x="568" y="654" class="badge-t" text-anchor="middle">s3</text>
+<text x="524" y="680" class="cb">synced at start, then offline</text>
+<rect x="750" y="628" width="254" height="74" rx="7" class="chip"/>
+<text x="766" y="651" class="mono">DEPLOY_MODE=local|aws</text>
+<text x="766" y="671" class="cb">bind address, log format, storage</text>
+<text x="766" y="689" class="cb">defaults; explicit env vars win</text>
+</svg>

@@ -7,7 +7,6 @@ per document, aligned to input order. Jina is the default.
 from __future__ import annotations
 
 import os
-from typing import List
 
 from src.rerankers.base_reranker import BaseReranker
 from src.logging_config import get_logger

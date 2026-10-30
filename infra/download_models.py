@@ -30,6 +30,12 @@ REPOS = {
 }
 DEFAULTS = ["bge", "jina"]
 
+# Commit pins for repos whose remote code the service executes. Must match
+# _MODEL_REVISION in src/rerankers/jina_reranker.py (test/test_model_pins.py checks it).
+REVISIONS = {
+    "jinaai/jina-reranker-v3": "050e171c4f75dfec5b648ed8470a2475e5a30f30",
+}
+
 # Skip weights for frameworks this service never uses (torch only). Trims the
 # snapshot substantially without touching what transformers/FlagEmbedding load.
 IGNORE_PATTERNS = [
@@ -48,6 +54,7 @@ def main(argv: list[str]) -> int:
         print(f"[download_models] {repo} -> {hf_home}", flush=True)
         snapshot_download(
             repo_id=repo,
+            revision=REVISIONS.get(repo),
             ignore_patterns=IGNORE_PATTERNS,
             # trust_remote_code models (jina-v3) ship .py in the snapshot; those
             # are matched by default patterns and kept.

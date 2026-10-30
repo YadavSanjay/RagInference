@@ -1,116 +1,251 @@
-# RagInference
+<h1 align="center">RagInference</h1>
 
-A standalone **inference service** for shared RAG models, extracted from ARag so
-the heavy models load **once** in a single process and are shared by every client
-(ARag, MacroRAG, …) over HTTP — instead of each client subprocess loading its own
-multi-GB copy and exhausting RAM.
+<p align="center">
+  <b>One copy of your RAG models, shared by every client.</b><br>
+  A small HTTP service that loads a <b>BGE-M3 embedder and a reranker once</b> and serves
+  <code>/embed</code> and <code>/rerank</code> to every RAG application on the machine or network,
+  on plain CPUs, with the memory limits that keep long documents from crashing the process.
+</p>
 
-Models (defaults):
-- **Embedder** — `BAAI/bge-m3` (dense + sparse / lexical).
-- **Reranker** — `jinaai/jina-reranker-v3` (local `transformers` model — no Jina
-  API / `JINA_API_KEY`). `RERANKER=bge` selects the lighter `bge-reranker-v2-m3`.
+<p align="center">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="CPU only" src="https://img.shields.io/badge/inference-CPU%20only-0f766e">
+  <img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%2B%20arm64-2496ED?logo=docker&logoColor=white">
+  <img alt="AWS Fargate ready" src="https://img.shields.io/badge/AWS-Fargate%20ready-b45309">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-lightgrey"></a>
+</p>
 
-## Why
+> **The code is MIT. The default reranker, `jina-reranker-v3`, is CC BY-NC 4.0 (non-commercial).**
+> For commercial use, set `RERANKER=bge`. See [License and support](#license-and-support).
 
-Two MCP subprocesses (ARag + MacroRAG) each loaded their own copy of BGE-M3
-(~2.5 GB) + jina-reranker-v3 (~0.9 GB), and concurrent cold loads spiked RAM into
-swap — inflating a ~92s rerank to >300s. One shared service removes the duplicate
-copies and serializes calls so the two servers stop contending.
+---
 
-## Layout (mirrors ARag)
+## Why RagInference
 
-```
-src/
-  __init__.py            # load_dotenv + configure_logging (settings-aware); DEFAULT_RERANKER/EMBEDDER
-  logging_config.py      # local: stderr + rotating file; aws: JSON to stdout (CloudWatch)
-  config/
-    settings.py          # typed Settings + DEPLOY_MODE (local|aws); one switch, legacy env preserved
-  storage/
-    __init__.py          # Storage seam: LocalStorage | S3Storage (build_storage); future blob IO
-  embedders/
-    base_embedder.py     # embed(texts, dense, sparse) -> list[{dense, sparse}]
-    bge_embedder.py      # BAAI/bge-m3 dense+sparse (default)
-    __init__.py          # build_embedder(name)
-  rerankers/
-    base_reranker.py     # rerank(query, list[str]) -> list[float]
-    jina_reranker.py     # jina-reranker-v3 (default; bounded-blocking memory fix)
-    bge_reranker.py      # bge-reranker-v2-m3 cross-encoder (RERANKER=bge)
-    __init__.py          # build_reranker(name)
-  service/
-    schemas.py           # Embed/Rerank/Health wire models
-    app.py               # FastAPI: POST /embed, POST /rerank, GET /healthz, GET /readyz
-    server.py            # uvicorn entrypoint + startup warm-up (both models)
-configs/logging.yaml
-infra/                   # containerization + AWS (infra/aws/) — see infra/README.md
-docs/aws-deployment-plan.md  # local + AWS deployment analysis / plan / change list
-test/                    # test_service.py, test_settings.py (stub models, no weights)
-```
+A RAG application usually loads its embedder and reranker into its own process. That is fine for
+one application. It stops being fine when you run several, or when one application starts several
+subprocesses, because each one holds its own multi-GB copy of the same weights.
 
-## Run
+This project came out of exactly that failure. Two MCP servers each loaded BGE-M3 (~2.5 GB) and
+jina-reranker-v3 (~0.9 GB). Concurrent cold starts pushed RAM into swap, and a ~92 s rerank took
+more than 300 s.
+
+Moving the models behind one service fixed it:
+
+- **One copy, however many clients.** Models load once in a single process. In the original
+  migration, client memory fell from **4.02 GB to 0.54 GB**, and remote embeddings and rerank
+  scores matched the local ones exactly.
+- **Safe on long documents.** Library defaults that work on short text can kill a CPU process on
+  long chunks such as SEC filing tables, so the wrappers set explicit limits
+  ([details](#the-limits-that-keep-it-alive)).
+- **Calls don't fight over the CPU.** Each model runs one forward pass at a time, because a single
+  pass already uses every core. Embed and rerank queue separately, so a sub-second query embedding
+  never waits behind a minutes-long rerank.
+- **Traffic only lands on a warm process.** Models load and warm at startup, and `/readyz` stays
+  503 until both are ready. Containers fail fast when their weights are missing, instead of coming
+  up healthy and useless.
+- **The same code runs locally and in the cloud.** `DEPLOY_MODE` switches bind address, logging
+  and storage defaults. Multi-arch images run on x86 or on Graviton.
+
+## What it serves
+
+| Endpoint | Purpose | Returns |
+|---|---|---|
+| `POST /embed` | Dense and sparse vectors from BGE-M3 | One `{dense, sparse}` per text, in input order |
+| `POST /rerank` | Relevance scores for candidate documents | One score per document, in input order |
+| `GET /healthz` | Liveness | Always 200 while the process is up, with each model's load state |
+| `GET /readyz` | Readiness | 503 until both default models are loaded, then 200 |
 
 ```bash
-conda run -n py312 python -m src.service.server
-# or configure:
-RAGINFER_HOST=0.0.0.0 RAGINFER_PORT=8799 RERANKER=jina EMBEDDER=bge \
-    conda run -n py312 python -m src.service.server
+curl -s localhost:8799/embed -H 'content-type: application/json' \
+  -d '{"texts": ["export control restrictions"], "dense": true, "sparse": true}'
 ```
 
-Env:
-- `DEPLOY_MODE` — `local` (default) | `aws`. In `aws` it derives cloud-friendly
-  defaults (bind `0.0.0.0`, JSON logs to stdout, no log file, S3 storage backend);
-  any explicit var below still overrides. Local behavior is unchanged when unset.
-- `RAGINFER_HOST` (default `127.0.0.1`) / `RAGINFER_PORT` (default `8799`)
-- `RERANKER` — `jina` (default) | `bge`
-- `EMBEDDER` — `bge` (default)
-- `RAGINFER_WARMUP` — `1` (default) loads + warms both models at startup
-
-## API
-
-`POST /embed`
 ```json
-{ "texts": ["export control restrictions"], "dense": true, "sparse": true }
+{
+  "embeddings": [
+    { "dense": [0.01, "..."], "sparse": { "indices": [4, 91], "values": [0.7, 0.3] } }
+  ],
+  "model": "BAAI/bge-m3",
+  "count": 1
+}
 ```
-→
+
+```bash
+curl -s localhost:8799/rerank -H 'content-type: application/json' \
+  -d '{"query": "export control restrictions", "documents": ["text a", "text b"]}'
+```
+
 ```json
-{ "embeddings": [ { "dense": [0.01, "..."], "sparse": { "indices": [4, 91], "values": [0.7, 0.3] } } ],
-  "model": "BAAI/bge-m3", "count": 1 }
+{ "scores": [0.91, 0.12], "model": "jinaai/jina-reranker-v3", "count": 2 }
 ```
 
-`POST /rerank`
-```json
-{ "query": "export control restrictions", "documents": ["text a", "text b"] }
+Scores stay aligned to the order you sent, so a client can sort them without tracking ids through
+the service. There is no SDK: it is plain HTTP and JSON. The
+[user guide](docs/user-guide.md) has the full API, a Python client and troubleshooting.
+
+---
+
+## Architecture at a glance
+
+The request path is deliberately thin, and the weight is in the model wrappers:
+
+<p align="center">
+  <a href="docs/images/architecture.svg">
+    <img src="docs/images/architecture.svg" width="100%"
+         alt="RagInference architecture: RAG clients call one service process over HTTP using RAGINFER_URL. A FastAPI layer enforces request bounds and exposes /embed, /rerank, /healthz and /readyz. Embed and rerank each take their own inference lock and run on one shared model: BGE-M3 for dense and sparse vectors, and jina-reranker-v3 or bge-reranker-v2-m3 for scores. Models are built once under a lock, warmed at startup and cached. Weights come from the Hugging Face cache at HF_HOME, filled by a fat image, the Hub or an S3 sync. DEPLOY_MODE switches local and AWS defaults.">
+  </a>
+</p>
+
+- **Uniform contracts.** Every embedder implements `embed(texts, dense, sparse)`, and every
+  reranker implements `rerank(query, documents)` returning scores in input order. FastAPI only
+  marshals JSON to and from them.
+- **Models are chosen by name.** Adding a model means a new wrapper subclass and a branch in its
+  factory. Nothing else changes.
+- **Scale with replicas, not workers.** Every uvicorn worker would load another full copy of the
+  weights, which is the problem this service exists to remove.
+- **Weights arrive through `HF_HOME`.** The service always reads the Hugging Face cache, so baking
+  weights into an image, downloading from the Hub and syncing from S3 are interchangeable.
+
+### The limits that keep it alive
+
+These are CPU forward passes, and the limits are what make them safe. Each one comes from a real
+failure:
+
+| Model | Default behaviour | What goes wrong | What this service does |
+|---|---|---|---|
+| BGE-M3 | `batch_size=256` | One huge forward pass segfaults on CPU | Caps `batch_size=12`, `max_length=8192` |
+| jina-reranker-v3 | Packs every candidate into one forward pass | It is listwise, so memory grows with the square of total tokens; SEC-style chunks went past 6 GB and crashed | Forces a 4,096-token block budget and truncates documents to 512 tokens |
+| jina-reranker-v3 | bf16 weights | Emulated on most x86 CPUs: a 24-document rerank took 169 s against 92 s in fp32, with negligible score change | Loads fp32 by default (`RERANKER_DTYPE`) |
+| Any | Unbounded request bodies | One bad payload ties up the CPU or memory | Returns 413 over `RAGINFER_MAX_ITEMS` or `RAGINFER_MAX_TEXT_CHARS` |
+
+Timings are from one x86 desktop CPU and will vary with your hardware.
+
+---
+
+## Quick start
+
+You need Python 3.12, 16 GB of RAM (8 GB is tight with both models warm) and about 4 GB of disk for
+the weights. No GPU and no API key are required.
+
+```bash
+git clone <this-repo> && cd RagInference
+python -m venv .venv && source .venv/bin/activate
+
+# CPU-only torch first: on x86 the default PyPI wheel pulls in multi-GB CUDA libraries
+pip install --index-url https://download.pytorch.org/whl/cpu torch
+pip install -r requirements.txt
+
+python -m src.service.server        # binds 127.0.0.1:8799
 ```
-→ `{ "scores": [0.91, 0.12], "model": "jinaai/jina-reranker-v3", "count": 2 }`
 
-`GET /healthz` → `{ "status": "ok", "embedder": "...", "reranker": "...", "embedder_loaded": true, "reranker_loaded": true }`
-(always 200 while the process is up = **liveness**.)
+The first start downloads the weights from Hugging Face, then warms both models. Wait for readiness:
 
-`GET /readyz` → same body, but **503 until both default models are loaded**, then 200
-(= **readiness**; used as the load-balancer / ECS target-group health check so traffic
-only lands on a warm task).
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8799/readyz    # 503 while loading, then 200
+```
 
-## Deployment (local & AWS)
+For commercial use, switch reranker with `RERANKER=bge`.
 
-The same image runs unchanged locally and on AWS; `DEPLOY_MODE` flips the defaults.
-The chosen cloud target is **ECS Fargate (CPU, ARM64/Graviton — ~20% cheaper), VPC-internal**,
-with optional **scheduled scale-to-zero** off-hours (load is batch-tolerant).
+### With Docker
 
-- **Copy-paste runbook** — local amd64 build/run + AWS arm64 build & push to ECR:
-  [`docs/runbook/build-and-push-ecr.md`](docs/runbook/build-and-push-ecr.md).
-- **Full deployment guide** — build → push to ECR → pull on a host → run on EC2/Fargate:
-  [`docs/deployment-guide.md`](docs/deployment-guide.md).
-- Full analysis, change list, and the **AWS services the infra project must provision**:
-  [`docs/aws-deployment-plan.md`](docs/aws-deployment-plan.md).
-- Container build (fat vs slim, ARM64 buildx recipe): [`infra/README.md`](infra/README.md).
-- Fargate contract, task-def template, scheduled scale-to-zero: [`infra/aws/`](infra/aws/).
+```bash
+# Slim image (~2.4 GB): weights download on first start, into a volume
+docker build -f infra/Dockerfile -t raginfer:slim .
+docker run --rm -p 8799:8799 -e MODEL_SOURCE=hf -v raginfer-models:/models raginfer:slim
+```
 
-## Clients
+`infra/README.md` covers the fat image, which has the weights baked in, and the S3-backed route.
 
-Point each client's `RAGINFER_URL` at `http://<host>:8799`. ARag ships
-`RemoteReranker` (`ARag/src/retriever/remote_reranker.py`) and `RemoteEmbedder`
-(`ARag/src/embeddings/remote_embedder.py`); the XBRL narrative retriever uses
-both automatically when `RAGINFER_URL` is set, falling back to local models only
-when it is not. MacroRAG needs equivalent shims.
+### Connecting a client
 
-See [`docs/user-guide.md`](docs/user-guide.md) for a client-facing guide:
-connecting via `RAGINFER_URL`, the full API reference, and common troubleshooting.
+Point the client at the service with `RAGINFER_URL=http://<host>:8799`. Any HTTP client works, and
+the [user guide](docs/user-guide.md#connecting-from-your-own-code) has a minimal Python example.
+
+RagInference was built for two companion projects, which are separate from this repository:
+**XbrlRag** (SEC filings) and **MacroRAG** (macro research). Both ship `RemoteEmbedder` and
+`RemoteReranker` shims that use the service when `RAGINFER_URL` is set and load local models when
+it is not.
+
+## Configuration
+
+Everything is set through environment variables. Unset means the default.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DEPLOY_MODE` | `local` | `aws` sets bind `0.0.0.0`, JSON logs to stdout and the S3 storage backend; explicit variables still win |
+| `RAGINFER_HOST` / `RAGINFER_PORT` | `127.0.0.1` / `8799` | Bind address |
+| `RERANKER` | `jina` | `jina` or `bge` |
+| `EMBEDDER` | `bge` | `bge` |
+| `RERANKER_DTYPE` | `float32` | `float32`, `bfloat16` or `auto` |
+| `RAGINFER_WARMUP` | `1` | Load and warm both models at startup |
+| `RAGINFER_MAX_ITEMS` | `4096` | Most texts or documents in one request |
+| `RAGINFER_MAX_TEXT_CHARS` | `200000` | Longest single text in a request |
+| `MODEL_SOURCE` | `baked` | Weight delivery in containers: `baked`, `hf` or `s3` |
+
+## Deployment
+
+The service has **no authentication and no TLS**. Keep it on loopback or a private network, and
+see [SECURITY.md](SECURITY.md).
+
+The AWS target is ECS Fargate on ARM64/Graviton, inside a VPC, with optional scheduled
+scale-to-zero for batch-tolerant loads. CPU forward passes are enough at this load, so a GPU would
+mostly sit idle.
+
+| Guide | Covers |
+|---|---|
+| [Build and push runbook](docs/runbook/build-and-push-ecr.md) | Copy-paste local amd64 and AWS arm64 builds, ECR push, arch verification |
+| [Deployment guide](docs/deployment-guide.md) | ECR pull setup, EC2 and Fargate runs, VPC endpoints, troubleshooting |
+| [AWS deployment plan](docs/aws-deployment-plan.md) | Cost analysis, CPU against GPU, options considered, what to provision |
+| [Containers](infra/README.md) | Fat and slim images, multi-arch builds, MinIO demo |
+| [Fargate contract](infra/aws/README.md) | Task definition template, environment, scheduled scaling |
+
+## Explore further
+
+```text
+src/
+  service/      FastAPI app, wire schemas, uvicorn entrypoint with warm-up
+  embedders/    BGE-M3 wrapper and factory
+  rerankers/    jina-reranker-v3 and bge-reranker-v2-m3 wrappers and factory
+  config/       Typed Settings driven by DEPLOY_MODE
+  storage/      Local and S3 adapter for future blob IO (weights do not use it)
+infra/          Dockerfile, compose file, entrypoint, AWS templates
+docs/           User guide, deployment guide, runbook, AWS plan
+test/           Service, settings and repo checks, with stub models and no weights
+```
+
+### Development
+
+Tests inject stub models, so they need no weights, GPU or network, and they do not install torch:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest test/ -q
+ruff check .
+mypy
+python scripts/check_public_safe.py    # no machine paths, account ids or keys in tracked files
+```
+
+CI runs the same four checks on every pull request.
+
+## License and support
+
+MIT — see [`LICENSE`](LICENSE).
+
+The models are not part of this repository. They are downloaded from Hugging Face and carry their
+own licenses, so check them before you deploy:
+
+| Model | Used for | License |
+|---|---|---|
+| [`BAAI/bge-m3`](https://huggingface.co/BAAI/bge-m3) | Dense and sparse embeddings (default) | MIT |
+| [`jinaai/jina-reranker-v3`](https://huggingface.co/jinaai/jina-reranker-v3) | Reranking (default) | **CC BY-NC 4.0 — non-commercial use only** |
+| [`BAAI/bge-reranker-v2-m3`](https://huggingface.co/BAAI/bge-reranker-v2-m3) | Reranking (`RERANKER=bge`) | Apache-2.0 |
+
+A fat image built with `BAKE_MODELS="bge jina"` contains the Jina weights, so its license terms
+apply to anyone you share that image with. The Jina model also runs Python from its model
+repository (`trust_remote_code`), so this project pins it to one commit: an upstream change can't
+alter what runs here until the pin moves.
+
+This is a personal project, shared as-is: no support, no stability guarantees, and no promise to
+review issues or pull requests. To report a security problem, see [SECURITY.md](SECURITY.md).

@@ -1,9 +1,9 @@
 """Minimal reranker interface for the service.
 
-Unlike ARag's in-repo ``BaseReranker`` (which also carried subquery fusion,
+Unlike XbrlRag's in-repo ``BaseReranker`` (which also carried subquery fusion,
 recency/table boosts and Qdrant ``ScoredPoint`` coupling), the service only
 needs the raw scoring contract; the score-combination orchestration stays on
-the client side (ARag) where the chunk metadata lives.
+the client side (XbrlRag) where the chunk metadata lives.
 """
 from __future__ import annotations
 

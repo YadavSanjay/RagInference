@@ -60,10 +60,18 @@ class Settings(BaseSettings):
     reranker: str = Field("jina", validation_alias=AliasChoices("RERANKER", "RAGINFER_RERANKER"))
     warmup: bool = Field(True, validation_alias=AliasChoices("RAGINFER_WARMUP"))
     # jina-reranker-v3 ships bf16 weights; on CPUs without native bf16 (most
-    # x86, e.g. the Windows dev box) bf16 matmuls are emulated and ~1.8x slower
+    # x86) bf16 matmuls are emulated and ~1.8x slower
     # than fp32 with no ranking benefit. "auto" = the checkpoint's own dtype.
     reranker_dtype: Literal["float32", "bfloat16", "auto"] = Field(
         "float32", validation_alias=AliasChoices("RERANKER_DTYPE", "RAGINFER_RERANKER_DTYPE")
+    )
+
+    # -- request bounds ------------------------------------------------------ #
+    # Ceilings against runaway payloads, well above what real clients send. They
+    # are not memory tuning: the per-model caps in the wrappers still apply.
+    max_items: int = Field(4096, gt=0, validation_alias=AliasChoices("RAGINFER_MAX_ITEMS"))
+    max_text_chars: int = Field(
+        200_000, gt=0, validation_alias=AliasChoices("RAGINFER_MAX_TEXT_CHARS")
     )
 
     # -- weight delivery (mirrors infra/entrypoint.sh) ----------------------- #
