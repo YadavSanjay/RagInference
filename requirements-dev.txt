@@ -1,0 +1,16 @@
+# RagInference — dev/CI dependencies, exact pins (upgrade deliberately). CI installs this light
+# set: tests inject stub models, so no torch, transformers or FlagEmbedding.
+fastapi==0.120.0
+uvicorn==0.38.0
+pydantic==2.11.9
+pydantic-settings==2.11.0
+python-dotenv==1.2.1
+PyYAML==6.0.2
+httpx==0.28.1
+python-json-logger==3.2.1
+boto3==1.35.49
+
+pytest==9.0.1
+ruff==0.14.2
+mypy==1.18.2
+types-PyYAML==6.0.12.20250915

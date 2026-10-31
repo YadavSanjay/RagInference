@@ -1,6 +1,6 @@
 """jina-reranker-v3 reranker (the service default).
 
-Moved verbatim (behaviour-preserving) from ARag's ``src/retriever/jina_reranker.py``
+Moved verbatim (behaviour-preserving) from XbrlRag's ``src/retriever/jina_reranker.py``
 so the bounded-blocking memory fix travels with the model. This is a **local**
 ``transformers`` model — there is no Jina API call and no ``JINA_API_KEY`` is
 read; ``rerank`` runs a CPU forward pass.
@@ -34,6 +34,12 @@ logger = get_logger(__name__)
 _MAX_DOC_TOKENS = 512
 _BLOCK_TOKEN_BUDGET = 4096
 
+# trust_remote_code runs Python from the model repo, so the commit is pinned: a new
+# upstream push can't change what executes here. Keep in step with REVISIONS in
+# infra/download_models.py and with the snapshot seeded into the weights bucket
+# (MODEL_SOURCE=s3 runs offline, so a commit missing from the cache fails to load).
+_MODEL_REVISION = "050e171c4f75dfec5b648ed8470a2475e5a30f30"
+
 
 class JinaReranker(BaseReranker):
     model_name = "jinaai/jina-reranker-v3"
@@ -48,7 +54,10 @@ class JinaReranker(BaseReranker):
             dtype = get_settings().reranker_dtype
         torch_dtype = "auto" if dtype == "auto" else getattr(torch, dtype)
         self.reranker = AutoModel.from_pretrained(
-            "jinaai/jina-reranker-v3", dtype=torch_dtype, trust_remote_code=True
+            "jinaai/jina-reranker-v3",
+            revision=_MODEL_REVISION,
+            dtype=torch_dtype,
+            trust_remote_code=True,
         )
         self.reranker.eval()
         # Force the model's internal token-budget blocking to actually engage:

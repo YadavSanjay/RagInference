@@ -369,7 +369,7 @@ plus the optional CI workflow.
 ## 10. Open questions / risks
 
 1. **Client integration ceiling:** Options A/A′/B keep the plain-HTTP `RAGINFER_URL`
-   contract (zero client change). C/D (SageMaker) do **not** — they'd force ARag/MacroRAG
+   contract (zero client change). C/D (SageMaker) do **not** — they'd force XbrlRag/MacroRAG
    shim rewrites. Given "used by other services in a VPC," staying on plain HTTP (Fargate
    or Lambda) is the low-friction path. Confirm we want to protect that contract.
 2. **Lambda memory headroom:** needs a real load test of both models at 10 GB before

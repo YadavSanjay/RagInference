@@ -54,14 +54,11 @@ operator must start it with `RAGINFER_HOST=0.0.0.0` (see
 
 ### How known clients use it
 
-- **ARag** ships `RemoteReranker` (`ARag/src/retriever/remote_reranker.py`) and
-  `RemoteEmbedder` (`ARag/src/embeddings/remote_embedder.py`). The XBRL narrative
-  retriever uses **both automatically when `RAGINFER_URL` is set**, and falls back
-  to loading local models only when it is **not** set. So for ARag, connecting is
-  usually just: set `RAGINFER_URL`, restart.
-- **MacroRAG** needs equivalent client shims (an embed shim + rerank shim that
-  POST to the two endpoints). Until those exist, MacroRAG falls back to local
-  models.
+- **XbrlRag** and **MacroRAG** each ship `RemoteReranker`
+  (`src/retriever/remote_reranker.py`) and `RemoteEmbedder`
+  (`src/embeddings/remote_embedder.py`). Both use them **automatically when
+  `RAGINFER_URL` is set**, and load local models only when it is **not** set. So
+  connecting is usually just: set `RAGINFER_URL`, restart.
 
 ### Connecting from your own code
 
@@ -244,11 +241,9 @@ httpx.ConnectError: [Errno 111] Connection refused
 
 - Confirm the variable is **exported in the same environment** the client runs in
   (a different shell, service manager, or container won't see your `export`).
-- For ARag specifically: if `RAGINFER_URL` is unset, the XBRL retriever silently
-  **falls back to local models** — that's the expected behavior, not a bug. Set the
-  variable and restart to switch to the remote service.
-- For MacroRAG: remote shims may not exist yet, so it may always run local until
-  they're added.
+- For XbrlRag and MacroRAG: if `RAGINFER_URL` is unset, the client silently **falls
+  back to local models** — that's the expected behavior, not a bug. Set the variable
+  and restart to switch to the remote service.
 
 ### `/healthz` works but `embedder_loaded` / `reranker_loaded` is `false`
 

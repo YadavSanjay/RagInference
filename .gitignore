@@ -1,9 +1,20 @@
 __pycache__/
 *.py[cod]
 .env
+.env.*
+!.env.example
 # local deploy overrides (real AWS account id, profile) — never commit
 infra/aws/deploy.env
+*.local.hcl
+# machine-specific notes and the local list of values barred from the public repo
+CLAUDE.local.md
+.public-denylist
+.claude/
 logs/
+models/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.deepeval/
 .venv/
 *.egg-info/

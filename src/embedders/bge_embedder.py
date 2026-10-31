@@ -1,9 +1,9 @@
 """BAAI/bge-m3 dense+sparse embedder (the service default).
 
-Wraps ``BGEM3FlagModel`` exactly like ARag's
+Wraps ``BGEM3FlagModel`` exactly like XbrlRag's
 ``src/embeddings/bge_embedding.py`` (same model, same memory-safe ``batch_size``
 / ``max_length`` defaults), but returns JSON-able dense lists + sparse
-``{indices, values}`` instead of ARag's dataclasses, which the client rebuilds.
+``{indices, values}`` instead of XbrlRag's dataclasses, which the client rebuilds.
 """
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ class BGEEmbedder(BaseEmbedder):
             texts, return_dense=dense, return_sparse=sparse,
             batch_size=self.batch_size, max_length=self.max_length,
         )
-        dense_vecs = vectors.get("dense_vecs") if dense else None
-        lexical = vectors.get("lexical_weights") if sparse else None
+        dense_vecs = vectors["dense_vecs"] if dense else []
+        lexical = vectors["lexical_weights"] if sparse else []
 
         out: List[Dict[str, Any]] = []
         for i in range(len(texts)):
@@ -47,7 +47,7 @@ class BGEEmbedder(BaseEmbedder):
             if sparse:
                 weights = lexical[i]
                 # token-id -> weight; cast to JSON-able int/float (mirrors
-                # BaseEmbeddingGenerator.dict_to_sparse_list on the ARag side).
+                # BaseEmbeddingGenerator.dict_to_sparse_list on the XbrlRag side).
                 indices = [int(k) for k in weights.keys()]
                 values = [float(weights[k]) for k in weights.keys()]
                 item["sparse"] = {"indices": indices, "values": values}

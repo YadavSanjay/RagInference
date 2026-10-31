@@ -9,7 +9,7 @@ Concrete, copy-paste commands for **this** project. For the conceptual reference
 
 | Target | Arch | How it's built |
 |---|---|---|
-| **Local** (dev/test on this Windows/x86 box) | **amd64** | plain `docker build` (host arch) |
+| **Local** (dev/test on an x86 workstation) | **amd64** | plain `docker build` (host arch) |
 | **AWS** (ECS Fargate / EC2 on Graviton) | **arm64** | `docker buildx --platform linux/arm64 --push` |
 
 > ⚠️ The two are **not interchangeable**. An amd64 image fails with `exec format
@@ -25,7 +25,7 @@ Concrete, copy-paste commands for **this** project. For the conceptual reference
 ## Local — amd64 (dev/test)
 
 ```powershell
-cd <repo-root>
+# from the repo root
 
 # slim (no weights) — supply weights at run time (MODEL_SOURCE=hf pulls from the Hub)
 docker build -f infra/Dockerfile -t raginfer:slim .
@@ -44,7 +44,7 @@ are ready. (`/healthz` is liveness-only and 200s before models load.)
 ## AWS — arm64 (build & push to ECR)
 
 ```powershell
-cd <repo-root>
+# from the repo root
 
 # --- 0. Load deploy vars from the gitignored env file, then derive the rest ---
 #     (one-time: cp infra/aws/deploy.env.example infra/aws/deploy.env  and fill in)
@@ -83,7 +83,7 @@ docker buildx imagetools inspect $TAG | Select-String -Pattern "Platform"
   The command is idempotent-ish: if the builder already exists it errors — then
   just `docker buildx use raginfer`.
 - **`--platform linux/arm64`** — forces the Graviton target regardless of host
-  arch. On this x86 box the build runs under **QEMU emulation** (slow — minutes;
+  arch. On an x86 host the build runs under **QEMU emulation** (slow — minutes;
   the tax is emulating the torch/deps install, not the weights). On a native ARM
   builder (Graviton CodeBuild/CI runner, Apple silicon) it's fast.
 - **`--provenance=false`** — suppresses the SBOM/provenance attestation manifest

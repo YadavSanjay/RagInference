@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A standalone HTTP **inference service** that loads heavy RAG models (a BGE-M3
 embedder + a reranker) **once** in a single process and serves `/embed` and
-`/rerank` to multiple clients (ARag, MacroRAG). The whole point is to avoid each
+`/rerank` to multiple clients (XbrlRag, MacroRAG). The whole point is to avoid each
 client subprocess loading its own multi-GB copy and exhausting RAM — so
 correctness here means *one shared copy, memory-safe, calls serialized*.
 
@@ -25,13 +25,20 @@ RAGINFER_HOST=0.0.0.0 RAGINFER_PORT=8799 RERANKER=jina EMBEDDER=bge \
 conda run -n py312 python -m pytest test/ -q                            # service + settings
 conda run -n py312 python -m pytest test/test_service.py -q -k rerank   # a single test
 conda run -n py312 python -m pytest test/test_settings.py -q            # DEPLOY_MODE / storage seam
+
+# Quality gate (CI runs the same four)
+conda run -n py312 ruff check .
+conda run -n py312 mypy
+conda run -n py312 python scripts/check_public_safe.py   # also reads gitignored .public-denylist
 ```
 
 Env knobs: `DEPLOY_MODE` (`local` default | `aws`), `RAGINFER_HOST` / `RAGINFER_PORT`,
 `RERANKER` (`jina` default | `bge`), `EMBEDDER` (`bge`), `RAGINFER_WARMUP` (`1` default —
 loads + warms both models at startup so the first real request is on the warm path),
 `RERANKER_DTYPE` (`float32` default | `bfloat16` | `auto` — Jina ships bf16 weights, but
-bf16 is emulated and ~1.8x slower on CPUs without native bf16, e.g. the x86 dev box).
+bf16 is emulated and ~1.8x slower on CPUs without native bf16, such as most x86),
+`RAGINFER_MAX_ITEMS` (`4096`) / `RAGINFER_MAX_TEXT_CHARS` (`200000`) — per-request
+ceilings, 413 above them; runaway-payload guards, not memory tuning.
 
 Container builds live in `infra/` — see [`infra/README.md`](infra/README.md). Two
 image shapes from one `Dockerfile` via `--build-arg BAKE_MODELS`: fat (weights
@@ -118,9 +125,22 @@ avoid segfaults/OOM, not arbitrary:
   chunks. The wrapper forces `_tokenizer.model_max_length = 4096` (block budget)
   and truncates docs to 512 tokens. Both bounds are load-bearing.
 
+- **The Jina revision is pinned** in [jina_reranker.py](src/rerankers/jina_reranker.py)
+  and [download_models.py](infra/download_models.py) because `trust_remote_code` runs
+  the model repo's Python. It must match a snapshot present in deployed weights:
+  `MODEL_SOURCE=s3|baked` run offline, so moving the pin without re-seeding stops the
+  reranker loading.
+
 ## Clients
 
-Clients point `RAGINFER_URL` at `http://<host>:8799`. ARag ships `RemoteReranker`
-/ `RemoteEmbedder` shims that call this service when `RAGINFER_URL` is set and
-fall back to local models otherwise; MacroRAG needs equivalent shims. See
+Clients point `RAGINFER_URL` at `http://<host>:8799`. XbrlRag and MacroRAG ship
+`RemoteReranker` / `RemoteEmbedder` shims that call this service when `RAGINFER_URL`
+is set and fall back to local models otherwise. See
 [docs/user-guide.md](docs/user-guide.md).
+
+## Publishing
+
+Development happens in a private repo; the public repo is a one-way downstream that
+receives single snapshot commits. Tracked files must stay safe to publish, so real values
+live only in gitignored files (`infra/aws/deploy.env`, `.public-denylist`,
+`CLAUDE.local.md`). Don't add the public repo as a remote of the dev working copy.

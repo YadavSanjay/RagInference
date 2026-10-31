@@ -1,9 +1,9 @@
-"""Minimal logging setup for the ARagReranker service.
+"""Minimal logging setup for the RagInference service.
 
 Loads ``configs/logging.yaml`` if present; otherwise falls back to a basic
 stderr config. Logs go to **stderr** (never stdout) so the same module can be
 embedded behind a stdio transport without corrupting a JSON-RPC stream — the
-lesson learned in ARag's MCP server.
+lesson learned in XbrlRag's MCP server.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 try:
     import yaml
 except Exception:  # pragma: no cover
-    yaml = None
+    yaml = None  # type: ignore[assignment]  # optional: falls back to basicConfig below
 
 
 def _default_config_path() -> Path:

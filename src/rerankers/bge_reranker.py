@@ -1,7 +1,7 @@
 """bge-reranker-v2-m3 cross-encoder (faster, lighter alternative to Jina).
 
 Reimplemented against the uniform ``rerank(query, list[str]) -> list[float]``
-contract (ARag's original ``BGEReranker`` took a chunk-id dict). A plain
+contract (XbrlRag's original ``BGEReranker`` took a chunk-id dict). A plain
 cross-encoder: pairs ``[query, doc]`` scored independently, so it is far cheaper
 on CPU than the listwise Jina model — kept here as a drop-in the service can
 select via ``RERANKER=bge`` when latency matters more than listwise quality.
