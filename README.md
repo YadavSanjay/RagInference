@@ -1,7 +1,7 @@
 <h1 align="center">RagInference</h1>
 
 <p align="center">
-  <b>One copy of your RAG models, shared by every client.</b><br>
+  <b>Shared embed + re-rank Inference service for RAG clients (XbrlRag, MacroRAG)</b><br>
   A small HTTP service that loads a <b>BGE-M3 embedder and a reranker once</b> and serves
   <code>/embed</code> and <code>/rerank</code> to every RAG application on the machine or network,
   on plain CPUs, with the memory limits that keep long documents from crashing the process.
